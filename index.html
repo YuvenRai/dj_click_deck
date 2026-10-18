@@ -67,6 +67,84 @@
       transition: opacity var(--fade-duration, 19s) linear;
     }
 
+    .camera-dialog {
+      width: min(calc(100% - 2rem), 32rem);
+      max-height: calc(100vh - 2rem);
+      max-height: calc(100dvh - 2rem);
+      overflow-y: auto;
+      padding: 1.25rem;
+      border: 1px solid rgb(115 247 255 / 30%);
+      border-radius: 20px;
+      color: #f8f5ed;
+      background: linear-gradient(145deg, #211331, #0d0a19);
+      box-shadow: 0 28px 90px rgb(0 0 0 / 70%), 0 0 55px rgb(0 229 255 / 12%);
+    }
+
+    .camera-dialog::backdrop {
+      background: rgb(5 4 12 / 84%);
+      backdrop-filter: blur(8px);
+    }
+
+    .camera-dialog h2 {
+      margin: 0 0 0.5rem;
+      padding-right: 2.5rem;
+      color: #73f7ff;
+    }
+
+    .camera-close-button {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      display: grid;
+      width: 2.5rem;
+      min-height: 2.5rem;
+      padding: 0;
+      place-items: center;
+      border: 1px solid rgb(115 247 255 / 45%);
+      border-radius: 10px;
+      color: #f8f5ed;
+      background: #100d1a;
+      font: inherit;
+      font-size: 1.5rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .camera-close-button:focus-visible {
+      outline: 3px solid #ff52ce;
+      outline-offset: 3px;
+    }
+
+    .camera-preview {
+      display: block;
+      width: 100%;
+      max-height: 55dvh;
+      margin: 1rem 0;
+      aspect-ratio: 4 / 3;
+      border-radius: 12px;
+      background: #100d1a;
+      object-fit: contain;
+    }
+
+    .camera-preview[hidden] {
+      display: none;
+    }
+
+    .camera-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .camera-status {
+      min-height: 1.5em;
+      margin: 0.75rem 0 0;
+      color: #73f7ff;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
     .instructions.is-closing {
       opacity: 0;
       pointer-events: none;
@@ -671,11 +749,28 @@
       <p class="recording-status" id="recordingStatus" role="status" aria-live="polite">Reach 200 points to unlock microphone recording.</p>
       <audio class="recorded-audio" id="recordedAudio" controls hidden></audio>
     </div>
+    <button class="mic-button" id="openCameraButton" type="button">Take a photo</button>
     <div class="equalizer" aria-hidden="true">
       <span></span><span></span><span></span><span></span><span></span>
       <span></span><span></span><span></span><span></span><span></span>
       <span></span><span></span><span></span><span></span><span></span>
     </div>
+
+    <dialog class="camera-dialog" id="cameraDialog" aria-labelledby="cameraTitle">
+      <button class="camera-close-button" id="cameraCloseButton" type="button" aria-label="Close camera">×</button>
+      <h2 id="cameraTitle">Take a photo to share</h2>
+      <p class="hint">Your photo stays on this device unless you choose to share or download it.</p>
+      <video class="camera-preview" id="cameraVideo" autoplay playsinline aria-label="Live camera preview" hidden></video>
+      <img class="camera-preview" id="photoPreview" alt="Your captured photo" hidden>
+      <div class="camera-actions">
+        <button class="mic-button" id="capturePhotoButton" type="button" hidden>Take photo</button>
+        <button class="mic-button" id="sharePhotoButton" type="button" hidden>Share with friends</button>
+        <button class="mic-button" id="downloadPhotoButton" type="button" hidden>Download photo</button>
+        <button class="mic-button" id="retakePhotoButton" type="button" hidden>Retake</button>
+        <button class="mic-button" id="closeCameraButton" type="button">Close</button>
+      </div>
+      <p class="camera-status" id="cameraStatus" role="status" aria-live="polite"></p>
+    </dialog>
 
     <section class="shop" aria-labelledby="shopTitle">
       <h2 class="shop-title" id="shopTitle">Upgrades</h2>
@@ -694,6 +789,18 @@
     const recordedAudio = document.getElementById("recordedAudio");
     const microphoneButton = document.getElementById("microphoneButton");
     const recordAgainButton = document.getElementById("recordAgainButton");
+    const openCameraButton = document.getElementById("openCameraButton");
+    const cameraDialog = document.getElementById("cameraDialog");
+    const cameraVideo = document.getElementById("cameraVideo");
+    const photoPreview = document.getElementById("photoPreview");
+    const capturePhotoButton = document.getElementById("capturePhotoButton");
+    const sharePhotoButton = document.getElementById("sharePhotoButton");
+    const downloadPhotoButton = document.getElementById("downloadPhotoButton");
+    const retakePhotoButton = document.getElementById("retakePhotoButton");
+    const closeCameraButton = document.getElementById("closeCameraButton");
+    const cameraCloseButton = document.getElementById("cameraCloseButton");
+    const cameraStatus = document.getElementById("cameraStatus");
+    const photoCanvas = document.createElement("canvas");
     const instructions = document.getElementById("instructions");
     const game = document.querySelector(".game");
     const startGameButton = document.getElementById("startGame");
@@ -737,7 +844,9 @@
     const upgradePurchaseCounts = upgrades.map(() => 0);
     const upgradeButtons = [];
     const upgradeDetails = [];
-    const serverApi = "/api";
+    const localLiveServer = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+      && window.location.port === "5500";
+    const serverApi = localLiveServer ? "https://djdeck4.netlify.app/api" : "/api";
 
     function beginInstructionsFade() {
       startGameButton.disabled = true;
@@ -1190,6 +1299,146 @@
 
     microphoneButton.addEventListener("click", toggleMicrophoneRecording);
     recordAgainButton.addEventListener("click", () => toggleMicrophoneRecording(true));
+
+    let cameraStream;
+    let photoBlob;
+    let photoUrl;
+
+    function stopPhotoCamera() {
+      cameraStream?.getTracks().forEach((track) => track.stop());
+      cameraStream = undefined;
+      cameraVideo.srcObject = null;
+    }
+
+    function clearPhotoPreview() {
+      if (photoUrl) {
+        URL.revokeObjectURL(photoUrl);
+        photoUrl = undefined;
+      }
+      photoBlob = undefined;
+      photoPreview.removeAttribute("src");
+      photoPreview.hidden = true;
+      sharePhotoButton.hidden = true;
+      downloadPhotoButton.hidden = true;
+      retakePhotoButton.hidden = true;
+    }
+
+    async function startPhotoCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        cameraStatus.textContent = "Camera access is unavailable. Open this page over HTTPS or localhost and use a supported browser.";
+        return;
+      }
+
+      cameraStatus.textContent = "Waiting for camera permission…";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: "user" }
+        });
+        if (!cameraDialog.open) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stopPhotoCamera();
+        cameraStream = stream;
+        cameraVideo.srcObject = stream;
+        cameraVideo.hidden = false;
+        photoPreview.hidden = true;
+        capturePhotoButton.hidden = false;
+        cameraStatus.textContent = "Camera ready. Take a photo when you’re ready.";
+        await cameraVideo.play();
+      } catch (error) {
+        stopPhotoCamera();
+        cameraVideo.hidden = true;
+        capturePhotoButton.hidden = true;
+        cameraStatus.textContent = `Could not access the camera: ${error.message}`;
+      }
+    }
+
+    openCameraButton.addEventListener("click", async () => {
+      clearPhotoPreview();
+      cameraDialog.showModal();
+      await startPhotoCamera();
+    });
+
+    closeCameraButton.addEventListener("click", () => cameraDialog.close());
+    cameraCloseButton.addEventListener("click", () => cameraDialog.close());
+    cameraDialog.addEventListener("close", stopPhotoCamera);
+
+    capturePhotoButton.addEventListener("click", async () => {
+      if (!cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+        cameraStatus.textContent = "The camera is not ready yet. Try again in a moment.";
+        return;
+      }
+
+      photoCanvas.width = cameraVideo.videoWidth;
+      photoCanvas.height = cameraVideo.videoHeight;
+      const context = photoCanvas.getContext("2d");
+      if (!context) {
+        cameraStatus.textContent = "Could not prepare the photo on this device.";
+        return;
+      }
+      context.drawImage(cameraVideo, 0, 0);
+      try {
+        photoBlob = await new Promise((resolve, reject) => {
+          photoCanvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error("The browser could not create an image."));
+            }
+          }, "image/jpeg", 0.9);
+        });
+        photoUrl = URL.createObjectURL(photoBlob);
+        photoPreview.src = photoUrl;
+        photoPreview.hidden = false;
+        cameraVideo.hidden = true;
+        capturePhotoButton.hidden = true;
+        stopPhotoCamera();
+        sharePhotoButton.hidden = !navigator.share
+          || !navigator.canShare?.({ files: [new File([photoBlob], "dj-click-deck-photo.jpg", { type: "image/jpeg" })] });
+        downloadPhotoButton.hidden = false;
+        retakePhotoButton.hidden = false;
+        cameraStatus.textContent = sharePhotoButton.hidden
+          ? "Photo ready. Download it to send it using your preferred app."
+          : "Photo ready. Share it with a friend or download it.";
+      } catch (error) {
+        cameraStatus.textContent = `Could not create the photo: ${error.message}`;
+      }
+    });
+
+    sharePhotoButton.addEventListener("click", async () => {
+      if (!photoBlob) {
+        cameraStatus.textContent = "Take a photo before sharing.";
+        return;
+      }
+      const photo = new File([photoBlob], "dj-click-deck-photo.jpg", { type: "image/jpeg" });
+      try {
+        await navigator.share({ files: [photo], title: "A photo from DJ Click Deck" });
+        cameraStatus.textContent = "The share sheet has closed.";
+      } catch (error) {
+        cameraStatus.textContent = error.name === "AbortError"
+          ? "Sharing cancelled."
+          : `Could not share the photo: ${error.message}`;
+      }
+    });
+
+    downloadPhotoButton.addEventListener("click", () => {
+      if (!photoUrl) {
+        cameraStatus.textContent = "Take a photo before downloading.";
+        return;
+      }
+      const downloadLink = document.createElement("a");
+      downloadLink.href = photoUrl;
+      downloadLink.download = "dj-click-deck-photo.jpg";
+      downloadLink.click();
+      cameraStatus.textContent = "Photo downloaded. You can attach it in a message to your friends.";
+    });
+
+    retakePhotoButton.addEventListener("click", async () => {
+      clearPhotoPreview();
+      await startPhotoCamera();
+    });
 
     updateScore(false);
 

@@ -5,13 +5,33 @@ const accounts = getStore({ name: "dj-click-deck-games", consistency: "strong" }
 const maxGameCodeLength = 256;
 const maxRecordingLength = 4_000_000;
 const maxRequestLength = 16 * 1024 * 1024;
+const allowedOrigins = new Set([
+  "https://djdeck4.netlify.app",
+  "http://localhost:5500",
+  "http://127.0.0.1:5500",
+  "http://localhost:8765",
+  "http://127.0.0.1:8765"
+]);
 
-function jsonResponse(status, value) {
+function corsHeaders(request) {
+  const headers = { "Vary": "Origin" };
+  const origin = request.headers.get("origin");
+  if (allowedOrigins.has(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+    headers["Access-Control-Allow-Headers"] = "Content-Type";
+    headers["Access-Control-Max-Age"] = "600";
+  }
+  return headers;
+}
+
+function jsonResponse(status, value, request) {
   return new Response(JSON.stringify(value), {
     status,
     headers: {
       "Cache-Control": "no-store",
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": "application/json; charset=utf-8",
+      ...corsHeaders(request)
     }
   });
 }
@@ -80,15 +100,23 @@ async function readJsonBody(request) {
 }
 
 async function handleRequest(request, endpoint) {
+  const origin = request.headers.get("origin");
+  const respond = (status, value) => jsonResponse(status, value, request);
+  if (origin && !allowedOrigins.has(origin)) {
+    return respond(403, { error: "This site is not allowed to use the game API." });
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
+  }
   if (request.method !== "POST") {
-    return jsonResponse(405, { error: "POST is required." });
+    return respond(405, { error: "POST is required." });
   }
 
   let body;
   try {
     body = await readJsonBody(request);
   } catch (error) {
-    return jsonResponse(400, {
+    return respond(400, {
       error: error instanceof SyntaxError ? "The request body must be valid JSON." : error.message
     });
   }
@@ -96,17 +124,17 @@ async function handleRequest(request, endpoint) {
   const username = typeof body.username === "string" ? body.username.trim() : "";
   const gameCode = typeof body.gameCode === "string" ? body.gameCode : "";
   if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
-    return jsonResponse(400, { error: "Username must be 3 to 24 letters, numbers, or underscores." });
+    return respond(400, { error: "Username must be 3 to 24 letters, numbers, or underscores." });
   }
   const usernameKey = username.toLowerCase();
   const accountKey = `account:${usernameKey}`;
 
   if (endpoint === "create") {
     if (!gameCode || gameCode.length > maxGameCodeLength) {
-      return jsonResponse(400, { error: "Enter a Game Code of 256 characters or fewer." });
+      return respond(400, { error: "Enter a Game Code of 256 characters or fewer." });
     }
     if (!testSnapshot(body.snapshot)) {
-      return jsonResponse(400, { error: "The new game data is invalid." });
+      return respond(400, { error: "The new game data is invalid." });
     }
 
     const salt = randomBytes(32).toString("base64");
@@ -122,10 +150,10 @@ async function handleRequest(request, endpoint) {
     };
     const { modified } = await accounts.setJSON(accountKey, account, { onlyIfNew: true });
     if (!modified) {
-      return jsonResponse(409, { error: "That username already exists. Load its game with the correct Game Code." });
+      return respond(409, { error: "That username already exists. Load its game with the correct Game Code." });
     }
 
-    return jsonResponse(201, {
+    return respond(201, {
       snapshot: body.snapshot,
       created: true,
       sessionToken: createSessionToken(usernameKey, account.secretHash)
@@ -134,19 +162,19 @@ async function handleRequest(request, endpoint) {
 
   const account = await accounts.get(accountKey, { type: "json" });
   if (!account) {
-    return jsonResponse(401, { error: "Username or Game Code not found. Check both and try again." });
+    return respond(401, { error: "Username or Game Code not found. Check both and try again." });
   }
 
   if (endpoint === "load") {
     if (!gameCode || gameCode.length > maxGameCodeLength) {
-      return jsonResponse(401, { error: "Username or Game Code not found. Check both and try again." });
+      return respond(401, { error: "Username or Game Code not found. Check both and try again." });
     }
     const candidateHash = Buffer.from(createSecretHash(gameCode, account.salt, account.iterations), "base64");
     const expectedHash = Buffer.from(account.secretHash, "base64");
     if (candidateHash.length !== expectedHash.length || !timingSafeEqual(candidateHash, expectedHash)) {
-      return jsonResponse(401, { error: "Username or Game Code not found. Check both and try again." });
+      return respond(401, { error: "Username or Game Code not found. Check both and try again." });
     }
-    return jsonResponse(200, {
+    return respond(200, {
       snapshot: account.snapshot,
       recordingBase64: account.recordingBase64,
       recordingType: account.recordingType,
@@ -156,14 +184,14 @@ async function handleRequest(request, endpoint) {
 
   if (endpoint === "save") {
     if (!verifySessionToken(usernameKey, account.secretHash, body.sessionToken)) {
-      return jsonResponse(401, { error: "Your game session expired. Enter your username and Game Code again." });
+      return respond(401, { error: "Your game session expired. Enter your username and Game Code again." });
     }
     if (!testSnapshot(body.snapshot)) {
-      return jsonResponse(400, { error: "The saved game data is invalid." });
+      return respond(400, { error: "The saved game data is invalid." });
     }
     if (body.recordingBase64) {
       if (typeof body.recordingBase64 !== "string" || body.recordingBase64.length > maxRecordingLength) {
-        return jsonResponse(413, { error: "Microphone recording is too large to save. Record a shorter mix." });
+        return respond(413, { error: "Microphone recording is too large to save. Record a shorter mix." });
       }
       account.recordingBase64 = body.recordingBase64;
       account.recordingType = typeof body.recordingType === "string" && /^audio\/[a-z0-9.+-]+$/.test(body.recordingType)
@@ -172,10 +200,10 @@ async function handleRequest(request, endpoint) {
     }
     account.snapshot = body.snapshot;
     await accounts.setJSON(accountKey, account);
-    return jsonResponse(200, { ok: true });
+    return respond(200, { ok: true });
   }
 
-  return jsonResponse(404, { error: "API endpoint not found." });
+  return respond(404, { error: "API endpoint not found." });
 }
 
 export default async function handler(request) {
@@ -185,7 +213,7 @@ export default async function handler(request) {
     return await handleRequest(request, endpoint);
   } catch (error) {
     console.error("DJ Click Deck API request failed.", error);
-    return jsonResponse(500, { error: "The game server could not complete the request. Please try again." });
+    return jsonResponse(500, { error: "The game server could not complete the request. Please try again." }, request);
   }
 }
 
