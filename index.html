@@ -119,11 +119,43 @@
       display: block;
       width: 100%;
       max-height: 55dvh;
-      margin: 1rem 0;
-      aspect-ratio: 4 / 3;
-      border-radius: 12px;
       background: #100d1a;
       object-fit: contain;
+    }
+
+    .photo-stage {
+      position: relative;
+      width: 100%;
+      margin: 1rem 0;
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #06b6d4, #7c3aed 58%, #f472b6);
+    }
+
+    .photo-stage[data-photo-background="1"] {
+      background: linear-gradient(135deg, #06b6d4, #7c3aed 58%, #f472b6);
+    }
+
+    .photo-stage[data-photo-background="2"] {
+      background: linear-gradient(135deg, #f97316, #facc15 58%, #db2777);
+    }
+
+    .photo-stage[data-photo-background="3"] {
+      background: linear-gradient(135deg, #0ea5e9, #6366f1 58%, #a855f7);
+    }
+
+    .photo-stage[data-photo-background="4"] {
+      background: linear-gradient(135deg, #22c55e, #14b8a6 58%, #0ea5e9);
+    }
+
+    .photo-stage .camera-preview {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      object-fit: cover;
     }
 
     .camera-preview[hidden] {
@@ -701,7 +733,7 @@
         <li>Spend points on upgrades to boost your score.</li>
         <li>At 200 points, use the microphone button to record and play your mix.</li>
       </ul>
-      <p class="save-code-notice">After the fade, your DJ deck will load for 10 seconds. Then enter a username and Game Code to create or load your game.</p>
+      <p class="save-code-notice">After the intro closes, your DJ deck will load for 10 seconds. Then enter a username and Game Code to create or load your game.</p>
       <button class="instructions-start" id="startGame" type="button">Start playing</button>
     </dialog>
 
@@ -759,10 +791,13 @@
     <dialog class="camera-dialog" id="cameraDialog" aria-labelledby="cameraTitle">
       <button class="camera-close-button" id="cameraCloseButton" type="button" aria-label="Close camera">×</button>
       <h2 id="cameraTitle">Take a photo to share</h2>
-      <p class="hint">Your photo stays on this device unless you choose to share or download it.</p>
-      <video class="camera-preview" id="cameraVideo" autoplay playsinline aria-label="Live camera preview" hidden></video>
-      <img class="camera-preview" id="photoPreview" alt="Your captured photo" hidden>
+      <p class="hint">Choose a background, then take a photo. Background removal happens on this device.</p>
+      <div class="photo-stage" id="photoStage" data-photo-background="1">
+        <video class="camera-preview" id="cameraVideo" autoplay playsinline aria-label="Live camera preview" hidden></video>
+        <img class="camera-preview" id="photoPreview" alt="Your captured photo" hidden>
+      </div>
       <div class="camera-actions">
+        <button class="mic-button" id="changeBackgroundButton" type="button">Change background</button>
         <button class="mic-button" id="capturePhotoButton" type="button" hidden>Take photo</button>
         <button class="mic-button" id="sharePhotoButton" type="button" hidden>Share with friends</button>
         <button class="mic-button" id="downloadPhotoButton" type="button" hidden>Download photo</button>
@@ -791,8 +826,10 @@
     const recordAgainButton = document.getElementById("recordAgainButton");
     const openCameraButton = document.getElementById("openCameraButton");
     const cameraDialog = document.getElementById("cameraDialog");
+    const photoStage = document.getElementById("photoStage");
     const cameraVideo = document.getElementById("cameraVideo");
     const photoPreview = document.getElementById("photoPreview");
+    const changeBackgroundButton = document.getElementById("changeBackgroundButton");
     const capturePhotoButton = document.getElementById("capturePhotoButton");
     const sharePhotoButton = document.getElementById("sharePhotoButton");
     const downloadPhotoButton = document.getElementById("downloadPhotoButton");
@@ -801,6 +838,9 @@
     const cameraCloseButton = document.getElementById("cameraCloseButton");
     const cameraStatus = document.getElementById("cameraStatus");
     const photoCanvas = document.createElement("canvas");
+    const photoSourceCanvas = document.createElement("canvas");
+    const photoMaskCanvas = document.createElement("canvas");
+    const photoSubjectCanvas = document.createElement("canvas");
     const instructions = document.getElementById("instructions");
     const game = document.querySelector(".game");
     const startGameButton = document.getElementById("startGame");
@@ -847,9 +887,16 @@
     const localLiveServer = ["localhost", "127.0.0.1"].includes(window.location.hostname)
       && window.location.port === "5500";
     const serverApi = localLiveServer ? "https://djdeck4.netlify.app/api" : "/api";
+    const localCameraPointGate = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+      && ["5500", "8765"].includes(window.location.port);
+    const skipIntroFade = localCameraPointGate;
 
     function beginInstructionsFade() {
       startGameButton.disabled = true;
+      if (skipIntroFade) {
+        instructions.close();
+        return;
+      }
       instructions.style.setProperty("--fade-duration", `${Math.floor(Math.random() * 28) + 8}s`);
       instructions.classList.add("is-closing");
     }
@@ -950,6 +997,7 @@
         upgradeDetails[index].textContent = `${upgrades[index].detail} · Cost: ${cost.toLocaleString()}${purchaseCount > 0 ? ` · Owned: ${purchaseCount}` : ""}`;
       });
       const recordingUnlocked = score >= 200;
+      openCameraButton.hidden = localCameraPointGate && score < 300;
       microphoneButton.hidden = !recordingUnlocked;
       recordAgainButton.hidden = !recordingUrl || mediaRecorder?.state === "recording";
       leaveGameButton.hidden = !authenticatedUsername;
@@ -1303,6 +1351,16 @@
     let cameraStream;
     let photoBlob;
     let photoUrl;
+    let photoBackgroundIndex = 0;
+    let selfieSegmentation;
+    let selfieSegmentationLoad;
+    let pendingMaskResult;
+    const photoBackgrounds = [
+      ["#06b6d4", "#7c3aed", "#f472b6"],
+      ["#f97316", "#facc15", "#db2777"],
+      ["#0ea5e9", "#6366f1", "#a855f7"],
+      ["#22c55e", "#14b8a6", "#0ea5e9"]
+    ];
 
     function stopPhotoCamera() {
       cameraStream?.getTracks().forEach((track) => track.stop());
@@ -1316,12 +1374,150 @@
         photoUrl = undefined;
       }
       photoBlob = undefined;
+      photoSourceCanvas.width = 0;
+      photoSourceCanvas.height = 0;
+      photoMaskCanvas.width = 0;
+      photoMaskCanvas.height = 0;
+      photoSubjectCanvas.width = 0;
+      photoSubjectCanvas.height = 0;
       photoPreview.removeAttribute("src");
       photoPreview.hidden = true;
+      photoStage.classList.remove("is-captured");
       sharePhotoButton.hidden = true;
       downloadPhotoButton.hidden = true;
       retakePhotoButton.hidden = true;
     }
+
+    function loadSelfieSegmentation() {
+      if (window.SelfieSegmentation) {
+        return Promise.resolve();
+      }
+      if (selfieSegmentationLoad) {
+        return selfieSegmentationLoad;
+      }
+
+      selfieSegmentationLoad = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js";
+        script.crossOrigin = "anonymous";
+        script.addEventListener("load", resolve, { once: true });
+        script.addEventListener("error", () => reject(new Error("Could not load the on-device background remover. Check your internet connection and try again.")), { once: true });
+        document.head.append(script);
+      }).catch((error) => {
+        selfieSegmentationLoad = undefined;
+        throw error;
+      });
+
+      return selfieSegmentationLoad;
+    }
+
+    async function getPersonMask() {
+      await loadSelfieSegmentation();
+      if (!selfieSegmentation) {
+        selfieSegmentation = new window.SelfieSegmentation({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/${file}`
+        });
+        selfieSegmentation.setOptions({ modelSelection: 1 });
+        selfieSegmentation.onResults((results) => {
+          if (!pendingMaskResult) {
+            return;
+          }
+          const maskContext = photoMaskCanvas.getContext("2d");
+          if (!maskContext || !results.segmentationMask) {
+            pendingMaskResult.reject(new Error("The background remover did not return a person mask."));
+            pendingMaskResult = undefined;
+            return;
+          }
+          photoMaskCanvas.width = photoSourceCanvas.width;
+          photoMaskCanvas.height = photoSourceCanvas.height;
+          photoMaskCanvas.getContext("2d").drawImage(results.segmentationMask, 0, 0, photoMaskCanvas.width, photoMaskCanvas.height);
+          pendingMaskResult.resolve();
+          pendingMaskResult = undefined;
+        });
+      }
+
+      await new Promise((resolve, reject) => {
+        pendingMaskResult = { resolve, reject };
+        selfieSegmentation.send({ image: photoSourceCanvas }).catch((error) => {
+          if (pendingMaskResult) {
+            pendingMaskResult.reject(error);
+            pendingMaskResult = undefined;
+          }
+        });
+      });
+    }
+
+    async function createBackgroundPhoto() {
+      if (!photoMaskCanvas.width || !photoMaskCanvas.height) {
+        cameraStatus.textContent = "Removing the room behind you on this device…";
+        await getPersonMask();
+      }
+      photoCanvas.width = photoSourceCanvas.width;
+      photoCanvas.height = photoSourceCanvas.height;
+      const context = photoCanvas.getContext("2d");
+      if (!context) {
+        throw new Error("Could not prepare the photo on this device.");
+      }
+
+      photoSubjectCanvas.width = photoSourceCanvas.width;
+      photoSubjectCanvas.height = photoSourceCanvas.height;
+      const subjectContext = photoSubjectCanvas.getContext("2d");
+      if (!subjectContext) {
+        throw new Error("Could not prepare the person cutout on this device.");
+      }
+      subjectContext.globalCompositeOperation = "source-over";
+      subjectContext.drawImage(photoSourceCanvas, 0, 0);
+      subjectContext.globalCompositeOperation = "destination-in";
+      subjectContext.drawImage(photoMaskCanvas, 0, 0);
+
+      const colors = photoBackgrounds[photoBackgroundIndex];
+      const gradient = context.createLinearGradient(0, 0, photoCanvas.width, photoCanvas.height);
+      gradient.addColorStop(0, colors[0]);
+      gradient.addColorStop(0.58, colors[1]);
+      gradient.addColorStop(1, colors[2]);
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, photoCanvas.width, photoCanvas.height);
+      context.drawImage(photoSubjectCanvas, 0, 0);
+
+      return new Promise((resolve, reject) => {
+        photoCanvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("The browser could not create an image."));
+          }
+        }, "image/jpeg", 0.9);
+      });
+    }
+
+    changeBackgroundButton.addEventListener("click", async () => {
+      photoBackgroundIndex = (photoBackgroundIndex + 1) % photoBackgrounds.length;
+      photoStage.dataset.photoBackground = String(photoBackgroundIndex + 1);
+      if (!photoBlob) {
+        cameraStatus.textContent = `Background ${photoBackgroundIndex + 1} selected. Take a photo to use it.`;
+        return;
+      }
+
+      changeBackgroundButton.disabled = true;
+      try {
+        const updatedPhoto = await createBackgroundPhoto();
+        const updatedPhotoUrl = URL.createObjectURL(updatedPhoto);
+        const previousPhotoUrl = photoUrl;
+        photoBlob = updatedPhoto;
+        photoUrl = updatedPhotoUrl;
+        photoPreview.src = photoUrl;
+        if (previousPhotoUrl) {
+          URL.revokeObjectURL(previousPhotoUrl);
+        }
+        sharePhotoButton.hidden = !navigator.share
+          || !navigator.canShare?.({ files: [new File([photoBlob], "dj-click-deck-photo.jpg", { type: "image/jpeg" })] });
+        cameraStatus.textContent = `Background ${photoBackgroundIndex + 1} applied to your photo.`;
+      } catch (error) {
+        cameraStatus.textContent = `Could not change the photo background: ${error.message}`;
+      } finally {
+        changeBackgroundButton.disabled = false;
+      }
+    });
 
     async function startPhotoCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -1342,6 +1538,7 @@
         stopPhotoCamera();
         cameraStream = stream;
         cameraVideo.srcObject = stream;
+        photoStage.classList.remove("is-captured");
         cameraVideo.hidden = false;
         photoPreview.hidden = true;
         capturePhotoButton.hidden = false;
@@ -1371,27 +1568,21 @@
         return;
       }
 
-      photoCanvas.width = cameraVideo.videoWidth;
-      photoCanvas.height = cameraVideo.videoHeight;
-      const context = photoCanvas.getContext("2d");
-      if (!context) {
-        cameraStatus.textContent = "Could not prepare the photo on this device.";
-        return;
-      }
-      context.drawImage(cameraVideo, 0, 0);
+      capturePhotoButton.disabled = true;
+      changeBackgroundButton.disabled = true;
       try {
-        photoBlob = await new Promise((resolve, reject) => {
-          photoCanvas.toBlob((blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error("The browser could not create an image."));
-            }
-          }, "image/jpeg", 0.9);
-        });
+        photoSourceCanvas.width = cameraVideo.videoWidth;
+        photoSourceCanvas.height = cameraVideo.videoHeight;
+        const sourceContext = photoSourceCanvas.getContext("2d");
+        if (!sourceContext) {
+          throw new Error("Could not prepare the photo on this device.");
+        }
+        sourceContext.drawImage(cameraVideo, 0, 0);
+        photoBlob = await createBackgroundPhoto();
         photoUrl = URL.createObjectURL(photoBlob);
         photoPreview.src = photoUrl;
         photoPreview.hidden = false;
+        photoStage.classList.add("is-captured");
         cameraVideo.hidden = true;
         capturePhotoButton.hidden = true;
         stopPhotoCamera();
@@ -1400,10 +1591,13 @@
         downloadPhotoButton.hidden = false;
         retakePhotoButton.hidden = false;
         cameraStatus.textContent = sharePhotoButton.hidden
-          ? "Photo ready. Download it to send it using your preferred app."
-          : "Photo ready. Share it with a friend or download it.";
+          ? "Background replaced. Download the photo to send it using your preferred app."
+          : "Background replaced. Share the photo with a friend or download it.";
       } catch (error) {
         cameraStatus.textContent = `Could not create the photo: ${error.message}`;
+      } finally {
+        capturePhotoButton.disabled = false;
+        changeBackgroundButton.disabled = false;
       }
     });
 
