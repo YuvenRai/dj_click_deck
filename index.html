@@ -380,6 +380,12 @@
       animation: score-pop 240ms ease-out;
     }
 
+    .combo-indicator {
+      margin: 0.5rem 0 0;
+      color: #ff855f;
+      font-weight: 700;
+    }
+
     .click-zone {
       position: relative;
       display: grid;
@@ -730,6 +736,7 @@
       <p>Build your score and unlock the DJ recording feature.</p>
       <ul>
         <li>Click the record to drop a beat and earn points.</li>
+        <li>Keep tapping to build a combo streak, up to 8x.</li>
         <li>Spend points on upgrades to boost your score.</li>
         <li>At 200 points, use the microphone button to record and play your mix.</li>
       </ul>
@@ -762,11 +769,12 @@
     <h1>DJ Click Deck With Upgrades</h1>
     <p class="score-label">Beats dropped</p>
     <output class="score" id="score" aria-live="polite">0</output>
+    <p class="combo-indicator" id="combo" aria-label="Current combo">Combo: 1x</p>
     <p class="save-code-notice" id="savedProgressDisplay" role="status" aria-live="polite" hidden></p>
     <button class="mic-button leave-game-button" id="leaveGameButton" type="button" hidden>Leave game</button>
 
     <div class="click-zone" id="clickZone">
-      <button class="click-button" id="clickButton" type="button" aria-label="Drop the beat and add one to your score">
+      <button class="click-button" id="clickButton" type="button" aria-label="Drop the beat and earn points">
         <span class="button-content">
           <span class="coin" aria-hidden="true">♫</span>
           <span class="button-text">Drop the beat</span>
@@ -817,6 +825,7 @@
     let score = 0;
 
     const scoreDisplay = document.getElementById("score");
+    const comboDisplay = document.getElementById("combo");
     const clickButton = document.getElementById("clickButton");
     const clickZone = document.getElementById("clickZone");
     const upgradeList = document.getElementById("upgradeList");
@@ -871,10 +880,12 @@
     let pointsPerSecond = 0;
     let clickMultiplier = 1;
     let passiveMultiplier = 1;
+    let combo = 1;
+    let comboTimer;
     let echoCount = 0;
     const upgrades = [
-      { name: "Auto-Clicker", cost: 10, detail: "+1 point per second", effect: "passive", value: 1 },
-      { name: "Bass Booster", cost: 25, detail: "+1 point per manual tap", effect: "tap", value: 1 },
+      { name: "Auto Hi-Hat", cost: 50, costScale: 1.6, detail: "+1 point per second", effect: "passive", value: 1 },
+      { name: "Sample Pack", cost: 15, costScale: 1.5, detail: "+1 point per click", effect: "tap", value: 1 },
       { name: "Drum Machine", cost: 60, detail: "+3 points per second", effect: "passive", value: 3 },
       { name: "Synth Pad", cost: 120, detail: "Double points per manual tap", effect: "tapMultiplier", value: 2 },
       { name: "Turbo Deck", cost: 250, detail: "Double all passive points", effect: "passiveMultiplier", value: 2 },
@@ -966,7 +977,7 @@
 
         score -= cost;
         upgradePurchaseCounts[index] += 1;
-        upgradeCosts[index] = Math.ceil(cost * 1.9);
+        upgradeCosts[index] = Math.ceil(cost * (upgrade.costScale ?? 1.9));
         if (upgrade.effect === "passive") {
           pointsPerSecond += upgrade.value;
         } else if (upgrade.effect === "tap") {
@@ -1015,6 +1026,16 @@
       if (persist) {
         persistCurrentProgress();
       }
+    }
+
+    function resetComboTimeout() {
+      combo = Math.min(combo + 1, 8);
+      comboDisplay.textContent = `Combo: ${combo}x${combo > 1 ? " 🔥" : ""}`;
+      window.clearTimeout(comboTimer);
+      comboTimer = window.setTimeout(() => {
+        combo = 1;
+        comboDisplay.textContent = "Combo: 1x";
+      }, 1500);
     }
 
     function getProgressSnapshot() {
@@ -1711,7 +1732,8 @@
     }
 
     clickButton.addEventListener("click", async (event) => {
-      score += clickMultiplier;
+      score += clickMultiplier * combo;
+      resetComboTimeout();
       updateScore();
       scoreDisplay.classList.remove("pop");
       void scoreDisplay.offsetWidth;
