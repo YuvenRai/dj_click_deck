@@ -751,7 +751,7 @@
 
     <section class="auth-panel" id="authPanel" aria-labelledby="authTitle" hidden>
       <h2 id="authTitle">Open your DJ deck</h2>
-      <p class="save-code-notice">Create a username and any Game Code, or enter them to load your saved game.</p>
+      <p class="save-code-notice">Choose a respectful username and Game Code, or enter them to load your saved game. Inappropriate entries temporarily lock this game; repeat entries increase the wait.</p>
       <form class="load-form" id="authForm">
         <label for="username">Username</label>
         <input id="username" name="username" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" required>
@@ -763,6 +763,7 @@
         </div>
         <p class="load-status" id="authStatus" role="status" aria-live="polite"></p>
       </form>
+      <p class="load-status" id="lockoutStatus" role="timer" aria-live="polite" hidden></p>
     </section>
 
     <p class="eyebrow">Now spinning · Club mode</p>
@@ -857,6 +858,7 @@
     const authPanel = document.getElementById("authPanel");
     const authForm = document.getElementById("authForm");
     const createGameButton = document.getElementById("createGameButton");
+    const lockoutStatus = document.getElementById("lockoutStatus");
     const usernameInput = document.getElementById("username");
     const gameCodeInput = document.getElementById("gameCode");
     const authStatus = document.getElementById("authStatus");
@@ -877,6 +879,9 @@
     let saveQueue = Promise.resolve();
     let lastSaveError;
     let loadingTimer;
+    let lockoutTimer;
+    let lockoutStrikes = 0;
+    let lockoutUntil = 0;
     let pointsPerSecond = 0;
     let clickMultiplier = 1;
     let passiveMultiplier = 1;
@@ -897,10 +902,105 @@
     const upgradeDetails = [];
     const localLiveServer = ["localhost", "127.0.0.1"].includes(window.location.hostname)
       && window.location.port === "5500";
+    const inappropriateContentChecksEnabled = !localLiveServer;
+    const lockoutStorageKey = "dj-click-deck-auth-lockout";
+    const lockoutStepMilliseconds = 5 * 60 * 1000;
+    const inappropriateTerms = [
+      "asshole", "bastard", "bitch", "bullshit", "cunt", "damn", "dick",
+      "fuck", "motherfucker", "nigger", "piss", "shit", "slut", "whore"
+    ];
     const serverApi = localLiveServer ? "https://djdeck4.netlify.app/api" : "/api";
     const localCameraPointGate = ["localhost", "127.0.0.1"].includes(window.location.hostname)
       && ["5500", "8765"].includes(window.location.port);
     const skipIntroFade = localCameraPointGate;
+
+    function restoreLockout() {
+      if (!inappropriateContentChecksEnabled) {
+        return;
+      }
+      const savedLockout = localStorage.getItem(lockoutStorageKey);
+      if (!savedLockout) {
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(savedLockout);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) {
+          throw error;
+        }
+        localStorage.removeItem(lockoutStorageKey);
+        return;
+      }
+      if (Number.isSafeInteger(parsed?.strikes) && parsed.strikes >= 0
+        && Number.isSafeInteger(parsed?.lockedUntil) && parsed.lockedUntil >= 0) {
+        lockoutStrikes = parsed.strikes;
+        lockoutUntil = parsed.lockedUntil;
+      } else {
+        localStorage.removeItem(lockoutStorageKey);
+      }
+    }
+
+    function renderLockout() {
+      const remaining = Math.max(0, lockoutUntil - Date.now());
+      if (remaining === 0) {
+        lockoutUntil = 0;
+        window.clearInterval(lockoutTimer);
+        lockoutTimer = undefined;
+        lockoutStatus.hidden = true;
+        authForm.hidden = false;
+        authStatus.textContent = "The temporary game lockout has ended. You can try again.";
+        usernameInput.focus();
+        return false;
+      }
+      const totalSeconds = Math.ceil(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      lockoutStatus.textContent = `Game access is temporarily locked. Try again in ${minutes}:${String(seconds).padStart(2, "0")}.`;
+      return true;
+    }
+
+    function startLockout() {
+      lockoutStrikes += 1;
+      lockoutUntil = Date.now() + lockoutStrikes * lockoutStepMilliseconds;
+      localStorage.setItem(lockoutStorageKey, JSON.stringify({
+        strikes: lockoutStrikes,
+        lockedUntil: lockoutUntil
+      }));
+      authForm.hidden = true;
+      authStatus.textContent = "";
+      lockoutStatus.hidden = false;
+      renderLockout();
+      window.clearInterval(lockoutTimer);
+      lockoutTimer = window.setInterval(renderLockout, 1000);
+    }
+
+    function containsInappropriateContent(value) {
+      if (!inappropriateContentChecksEnabled) {
+        return false;
+      }
+      const normalized = value.normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[013457]/g, (character) => ({ "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t" })[character])
+        .replace(/[^a-z]/g, "");
+      return inappropriateTerms.some((term) => normalized.includes(term));
+    }
+
+    function hasInappropriateCredentials() {
+      if (!inappropriateContentChecksEnabled) {
+        return false;
+      }
+      if (containsInappropriateContent(usernameInput.value) || containsInappropriateContent(gameCodeInput.value)) {
+        usernameInput.value = "";
+        gameCodeInput.value = "";
+        startLockout();
+        return true;
+      }
+      return false;
+    }
+
+    restoreLockout();
 
     function beginInstructionsFade() {
       startGameButton.disabled = true;
@@ -950,6 +1050,12 @@
       }
     });
     instructions.showModal();
+    if (lockoutUntil > Date.now()) {
+      authForm.hidden = true;
+      lockoutStatus.hidden = false;
+      renderLockout();
+      lockoutTimer = window.setInterval(renderLockout, 1000);
+    }
 
     upgrades.forEach((upgrade, index) => {
       const item = document.createElement("div");
@@ -1231,6 +1337,13 @@
       if (!authForm.reportValidity()) {
         return;
       }
+      if (lockoutUntil > Date.now()) {
+        renderLockout();
+        return;
+      }
+      if (hasInappropriateCredentials()) {
+        return;
+      }
       authStatus.textContent = "Creating your game…";
       createGameButton.disabled = true;
       try {
@@ -1251,6 +1364,13 @@
     authForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!authForm.reportValidity()) {
+        return;
+      }
+      if (lockoutUntil > Date.now()) {
+        renderLockout();
+        return;
+      }
+      if (hasInappropriateCredentials()) {
         return;
       }
       authStatus.textContent = "Loading your game…";
