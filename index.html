@@ -47,8 +47,8 @@
       box-shadow: 0 28px 90px rgb(0 0 0 / 55%), 0 0 60px rgb(135 58 255 / 10%), inset 0 1px rgb(255 255 255 / 7%);
     }
 
-    .game.is-intro > :not(.instructions):not(.auth-panel):not(.loading-panel),
-    .game.is-locked > :not(.instructions):not(.auth-panel):not(.loading-panel) {
+    .game.is-intro > :not(.instructions):not(.auth-panel):not(.loading-panel):not(.lockout-panel),
+    .game.is-locked > :not(.instructions):not(.auth-panel):not(.loading-panel):not(.lockout-panel) {
       visibility: hidden;
     }
 
@@ -78,6 +78,27 @@
       color: #f8f5ed;
       background: linear-gradient(145deg, #211331, #0d0a19);
       box-shadow: 0 28px 90px rgb(0 0 0 / 70%), 0 0 55px rgb(0 229 255 / 12%);
+    }
+
+    .recovery-id-value {
+      display: block;
+      width: 100%;
+      margin: 1.5rem 0;
+      padding: 1.5rem 1rem;
+      border: 2px solid rgb(115 247 255 / 65%);
+      border-radius: 16px;
+      color: #73f7ff;
+      background: linear-gradient(145deg, rgb(115 247 255 / 12%), #100d1a 70%);
+      box-shadow: 0 0 30px rgb(0 229 255 / 14%), inset 0 1px rgb(255 255 255 / 7%);
+      font: 800 clamp(1.15rem, 5vw, 1.8rem) ui-monospace, SFMono-Regular, Consolas, monospace;
+      letter-spacing: 0.08em;
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+
+    .recovery-id-dialog {
+      width: min(calc(100% - 2rem), 38rem);
+      text-align: center;
     }
 
     .camera-dialog::backdrop {
@@ -245,7 +266,8 @@
     }
 
     .auth-panel,
-    .loading-panel {
+    .loading-panel,
+    .lockout-panel {
       position: fixed;
       z-index: 5;
       top: max(1rem, env(safe-area-inset-top, 0px));
@@ -264,8 +286,29 @@
       text-align: center;
     }
 
+    .lockout-panel {
+      text-align: center;
+    }
+
+    .feedback-link {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.65rem 1rem;
+      border-radius: 10px;
+      color: #090714;
+      background: #73f7ff;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .feedback-link:focus-visible {
+      outline: 3px solid #ff52ce;
+      outline-offset: 3px;
+    }
+
     .auth-panel h2,
-    .loading-panel h2 {
+    .loading-panel h2,
+    .lockout-panel h2 {
       margin: 0;
       color: #73f7ff;
       font-size: 1.25rem;
@@ -273,7 +316,8 @@
     }
 
     .auth-panel[hidden],
-    .loading-panel[hidden] {
+    .loading-panel[hidden],
+    .lockout-panel[hidden] {
       display: none;
     }
 
@@ -318,6 +362,7 @@
     }
 
     .load-form[hidden],
+    .game-code-recovery[hidden],
     .mic-button[hidden],
     .leave-game-button[hidden] {
       display: none;
@@ -751,7 +796,7 @@
 
     <section class="auth-panel" id="authPanel" aria-labelledby="authTitle" hidden>
       <h2 id="authTitle">Open your DJ deck</h2>
-      <p class="save-code-notice">Choose a respectful username and Game Code, or enter them to load your saved game. Inappropriate entries temporarily lock this game; repeat entries increase the wait.</p>
+      <p class="save-code-notice">Choose a respectful username and Game Code, or enter them to load your saved game. New accounts receive a private Recovery ID to reset a forgotten Game Code. Inappropriate entries temporarily lock this game; repeat entries increase the wait.</p>
       <form class="load-form" id="authForm">
         <label for="username">Username</label>
         <input id="username" name="username" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" required>
@@ -763,8 +808,38 @@
         </div>
         <p class="load-status" id="authStatus" role="status" aria-live="polite"></p>
       </form>
-      <p class="load-status" id="lockoutStatus" role="timer" aria-live="polite" hidden></p>
+      <button class="instructions-load" id="forgotGameCodeButton" type="button">Forgot Game Code?</button>
+      <div class="game-code-recovery" id="gameCodeRecovery" hidden>
+        <label for="recoveryUsername">Enter your username</label>
+        <input id="recoveryUsername" name="recoveryUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+">
+        <label for="recoveryIdInput">Recovery ID</label>
+        <input id="recoveryIdInput" name="recoveryId" autocomplete="off" minlength="32" maxlength="32" pattern="[A-Fa-f0-9]{32}" title="Enter the 32-character Recovery ID" spellcheck="false">
+        <label for="newGameCodeInput">Choose a new Game Code</label>
+        <input id="newGameCodeInput" name="newGameCode" type="password" autocomplete="new-password" maxlength="256">
+        <button class="instructions-load" id="recoveryContinueButton" type="button">Reset Game Code</button>
+        <p class="load-status" id="recoveryStatus" role="status" aria-live="polite"></p>
+      </div>
     </section>
+
+    <section class="lockout-panel" id="lockoutPanel" aria-labelledby="lockoutTitle" hidden>
+      <h2 id="lockoutTitle">Game Access Locked</h2>
+      <p class="save-code-notice">Game access is paused because an inappropriate username or Game Code was entered.</p>
+      <p class="load-status" id="lockoutStatus" role="timer" aria-live="polite"></p>
+      <a class="feedback-link" href="feedback.html" target="_blank" rel="noopener">Send a message if this is a mistake</a>
+      <p class="save-code-notice">Sending a note will not open your game or disable the lock.</p>
+    </section>
+
+    <dialog class="camera-dialog recovery-id-dialog" id="recoveryIdDialog" aria-labelledby="recoveryIdTitle">
+      <h2 id="recoveryIdTitle">Save your Recovery ID</h2>
+      <p class="hint">This random, private code can reset your Game Code. It is not an email or official ID. Anyone with your username and Recovery ID could reset your Game Code, so keep it secret. This code is shown only now; after a reset, you get a new one.</p>
+      <output class="recovery-id-value" id="recoveryIdValue"></output>
+      <div class="camera-actions">
+        <button class="mic-button" id="copyRecoveryIdButton" type="button">Copy Recovery ID</button>
+        <button class="mic-button" id="downloadRecoveryIdButton" type="button">Download recovery info</button>
+        <button class="mic-button" id="closeRecoveryIdButton" type="button">I saved it</button>
+      </div>
+      <p class="camera-status" id="recoveryIdStatus" role="status" aria-live="polite"></p>
+    </dialog>
 
     <p class="eyebrow">Now spinning · Club mode</p>
     <h1>DJ Click Deck With Upgrades</h1>
@@ -856,8 +931,22 @@
     const startGameButton = document.getElementById("startGame");
     const loadingPanel = document.getElementById("loadingPanel");
     const authPanel = document.getElementById("authPanel");
+    const lockoutPanel = document.getElementById("lockoutPanel");
     const authForm = document.getElementById("authForm");
     const createGameButton = document.getElementById("createGameButton");
+    const forgotGameCodeButton = document.getElementById("forgotGameCodeButton");
+    const gameCodeRecovery = document.getElementById("gameCodeRecovery");
+    const recoveryUsernameInput = document.getElementById("recoveryUsername");
+    const recoveryIdInput = document.getElementById("recoveryIdInput");
+    const newGameCodeInput = document.getElementById("newGameCodeInput");
+    const recoveryContinueButton = document.getElementById("recoveryContinueButton");
+    const recoveryStatus = document.getElementById("recoveryStatus");
+    const recoveryIdDialog = document.getElementById("recoveryIdDialog");
+    const recoveryIdValue = document.getElementById("recoveryIdValue");
+    const recoveryIdStatus = document.getElementById("recoveryIdStatus");
+    const copyRecoveryIdButton = document.getElementById("copyRecoveryIdButton");
+    const downloadRecoveryIdButton = document.getElementById("downloadRecoveryIdButton");
+    const closeRecoveryIdButton = document.getElementById("closeRecoveryIdButton");
     const lockoutStatus = document.getElementById("lockoutStatus");
     const usernameInput = document.getElementById("username");
     const gameCodeInput = document.getElementById("gameCode");
@@ -948,7 +1037,8 @@
         lockoutUntil = 0;
         window.clearInterval(lockoutTimer);
         lockoutTimer = undefined;
-        lockoutStatus.hidden = true;
+        lockoutPanel.hidden = true;
+        authPanel.hidden = false;
         authForm.hidden = false;
         authStatus.textContent = "The temporary game lockout has ended. You can try again.";
         usernameInput.focus();
@@ -961,6 +1051,18 @@
       return true;
     }
 
+    function showLockoutScreen() {
+      game.classList.remove("is-intro");
+      game.classList.add("is-locked");
+      loadingPanel.hidden = true;
+      authPanel.hidden = true;
+      lockoutPanel.hidden = false;
+      renderLockout();
+      if (lockoutUntil > Date.now() && lockoutTimer === undefined) {
+        lockoutTimer = window.setInterval(renderLockout, 1000);
+      }
+    }
+
     function startLockout() {
       lockoutStrikes += 1;
       lockoutUntil = Date.now() + lockoutStrikes * lockoutStepMilliseconds;
@@ -968,12 +1070,10 @@
         strikes: lockoutStrikes,
         lockedUntil: lockoutUntil
       }));
-      authForm.hidden = true;
       authStatus.textContent = "";
-      lockoutStatus.hidden = false;
-      renderLockout();
       window.clearInterval(lockoutTimer);
-      lockoutTimer = window.setInterval(renderLockout, 1000);
+      lockoutTimer = undefined;
+      showLockoutScreen();
     }
 
     function containsInappropriateContent(value) {
@@ -1019,6 +1119,10 @@
       game.classList.remove("is-intro");
       if (!authenticatedUsername) {
         game.classList.add("is-locked");
+        if (lockoutUntil > Date.now()) {
+          showLockoutScreen();
+          return;
+        }
         loadingPanel.hidden = false;
         loadingTimer = window.setTimeout(() => {
           loadingPanel.hidden = true;
@@ -1050,12 +1154,10 @@
         instructions.showModal();
       }
     });
-    instructions.showModal();
     if (lockoutUntil > Date.now()) {
-      authForm.hidden = true;
-      lockoutStatus.hidden = false;
-      renderLockout();
-      lockoutTimer = window.setInterval(renderLockout, 1000);
+      showLockoutScreen();
+    } else {
+      instructions.showModal();
     }
 
     upgrades.forEach((upgrade, index) => {
@@ -1293,6 +1395,29 @@
       }
     }
 
+    function showRecoveryId(recoveryId, username, recovered = false) {
+      const hasRecoveryId = typeof recoveryId === "string" && /^[A-F0-9]{32}$/.test(recoveryId);
+      recoveryIdValue.hidden = !hasRecoveryId;
+      copyRecoveryIdButton.disabled = !hasRecoveryId;
+      downloadRecoveryIdButton.disabled = !hasRecoveryId;
+      recoveryIdValue.textContent = hasRecoveryId ? recoveryId : "";
+      recoveryIdStatus.textContent = hasRecoveryId
+        ? recovered
+          ? "Your Game Code was reset. Save this new Recovery ID; the previous one no longer works."
+          : "Save this Recovery ID now. It is shown only once."
+        : "This server has not enabled Recovery IDs yet. Keep your Game Code safe; it cannot be reset without a Recovery ID.";
+      recoveryIdDialog.dataset.username = username;
+      recoveryIdDialog.showModal();
+    }
+
+    window.addEventListener("beforeunload", (event) => {
+      if (!authenticatedUsername) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = "";
+    });
+
     leaveGameButton.addEventListener("click", async () => {
       if (!authenticatedUsername) {
         return;
@@ -1304,6 +1429,7 @@
 
       leaveGameButton.disabled = true;
       recordingStatus.textContent = "Saving your game before leaving…";
+      persistCurrentProgress();
       await saveQueue;
       if (lastSaveError) {
         recordingStatus.textContent = `Could not leave because your game did not save: ${lastSaveError.message}`;
@@ -1325,6 +1451,7 @@
       authStatus.textContent = "";
       authPanel.hidden = true;
       loadingPanel.hidden = true;
+      recoveryIdDialog.close();
       game.classList.remove("is-locked");
       game.classList.add("is-intro");
       leaveGameButton.hidden = true;
@@ -1348,12 +1475,29 @@
       authStatus.textContent = "Creating your game…";
       createGameButton.disabled = true;
       try {
+        let capabilities;
+        try {
+          capabilities = await apiRequest("/capabilities", {});
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "The server could not be checked.";
+          if (reason.includes("Username must be 3 to 24 letters, numbers, or underscores.")) {
+            throw new Error("The online game server has not been updated to support Recovery IDs yet. No account was created. Try again after the server update is deployed.");
+          }
+          throw new Error(`Could not confirm Recovery ID support. No account was created. ${reason}`);
+        }
+        if (capabilities.recoveryIds !== true) {
+          throw new Error("The game server does not support Recovery IDs yet. No account was created; try again after the server is updated.");
+        }
+        const username = usernameInput.value.trim();
         const result = await apiRequest("/create", {
-          username: usernameInput.value.trim(),
+          username,
           gameCode: gameCodeInput.value,
           snapshot: getProgressSnapshot()
         });
-        await enterGame(result, usernameInput.value.trim());
+        await enterGame(result, username);
+        if (result.created) {
+          showRecoveryId(result.recoveryId, username);
+        }
         authStatus.textContent = "New game created.";
       } catch (error) {
         authStatus.textContent = error.message;
@@ -1389,6 +1533,96 @@
         loadButton.disabled = false;
       }
     });
+
+    forgotGameCodeButton.addEventListener("click", () => {
+      gameCodeRecovery.hidden = !gameCodeRecovery.hidden;
+      recoveryStatus.textContent = "";
+      if (!gameCodeRecovery.hidden) {
+        recoveryUsernameInput.focus();
+      }
+    });
+
+    recoveryContinueButton.addEventListener("click", async () => {
+      const username = recoveryUsernameInput.value.trim();
+      const recoveryId = recoveryIdInput.value.trim();
+      const newGameCode = newGameCodeInput.value;
+      if (!username) {
+        recoveryStatus.textContent = "Enter your username.";
+        recoveryUsernameInput.focus();
+        return;
+      }
+      if (!recoveryUsernameInput.checkValidity()) {
+        recoveryUsernameInput.reportValidity();
+        return;
+      }
+      if (!recoveryId) {
+        recoveryStatus.textContent = "Enter your Recovery ID.";
+        recoveryIdInput.focus();
+        return;
+      }
+      if (!recoveryIdInput.checkValidity()) {
+        recoveryIdInput.reportValidity();
+        return;
+      }
+      if (!newGameCode) {
+        recoveryStatus.textContent = "Choose a new Game Code.";
+        newGameCodeInput.focus();
+        return;
+      }
+      if (lockoutUntil > Date.now()) {
+        renderLockout();
+        return;
+      }
+      if (containsInappropriateContent(username) || containsInappropriateContent(newGameCode)) {
+        recoveryUsernameInput.value = "";
+        recoveryIdInput.value = "";
+        newGameCodeInput.value = "";
+        startLockout();
+        return;
+      }
+
+      recoveryContinueButton.disabled = true;
+      recoveryStatus.textContent = "Checking your Recovery ID…";
+      try {
+        const result = await apiRequest("/recover", { username, recoveryId, newGameCode });
+        recoveryIdInput.value = "";
+        newGameCodeInput.value = "";
+        await enterGame(result, username);
+        showRecoveryId(result.recoveryId, username, true);
+      } catch (error) {
+        recoveryStatus.textContent = error.message;
+      } finally {
+        recoveryContinueButton.disabled = false;
+      }
+    });
+
+    copyRecoveryIdButton.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(recoveryIdValue.textContent);
+        recoveryIdStatus.textContent = "Recovery ID copied. Keep it private.";
+      } catch (error) {
+        recoveryIdStatus.textContent = error instanceof Error
+          ? `Could not copy the Recovery ID: ${error.message}`
+          : "Could not copy the Recovery ID. Select the code and copy it manually.";
+      }
+    });
+
+    downloadRecoveryIdButton.addEventListener("click", () => {
+      const username = recoveryIdDialog.dataset.username;
+      const content = `DJ Click Deck recovery information\nUsername: ${username}\nRecovery ID: ${recoveryIdValue.textContent}\n\nKeep this file private. Anyone with both values can reset the Game Code.\n`;
+      const file = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const downloadUrl = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = "dj-click-deck-recovery.txt";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      recoveryIdStatus.textContent = "Recovery information downloaded. Keep the file private.";
+    });
+
+    closeRecoveryIdButton.addEventListener("click", () => recoveryIdDialog.close());
 
     async function toggleMicrophoneRecording(recordAgain = false) {
       if (mediaRecorder?.state === "recording") {

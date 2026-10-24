@@ -45,6 +45,50 @@ function Handle-ApiRequest {
     $reader.Dispose()
   }
 
+  if ($request.Url.AbsolutePath -eq "/api/feedback") {
+    $origin = $request.Headers["Origin"]
+    if ($origin -notin @("http://127.0.0.1:8765", "http://localhost:8765")) {
+      Write-JsonResponse $Context.Response 403 @{ error = "Feedback must be sent from the local DJ Click Deck site." }
+      return
+    }
+    if ([System.Text.Encoding]::UTF8.GetByteCount($body) -gt 10000) {
+      Write-JsonResponse $Context.Response 413 @{ error = "Your note is too large." }
+      return
+    }
+
+    try {
+      $feedback = ConvertFrom-Json -InputObject $body -ErrorAction Stop
+    } catch {
+      Write-JsonResponse $Context.Response 400 @{ error = "Your note must be valid JSON." }
+      return
+    }
+    if ($feedback.website) {
+      Write-JsonResponse $Context.Response 202 @{ ok = $true }
+      return
+    }
+    if ($feedback.note -isnot [string] -or [string]::IsNullOrWhiteSpace($feedback.note) -or $feedback.note.Trim().Length -gt 2000) {
+      Write-JsonResponse $Context.Response 400 @{ error = "Write a note of 1 to 2000 characters." }
+      return
+    }
+
+    try {
+      $feedbackDirectory = Join-Path $env:LOCALAPPDATA "DJClickDeck"
+      [System.IO.Directory]::CreateDirectory($feedbackDirectory) | Out-Null
+      $feedbackFile = Join-Path $feedbackDirectory "feedback-notes.jsonl"
+      $entry = @{
+        note = $feedback.note.Trim()
+        createdAt = [DateTime]::UtcNow.ToString("o")
+      } | ConvertTo-Json -Compress
+      [System.IO.File]::AppendAllText($feedbackFile, "$entry`n", [System.Text.UTF8Encoding]::new($false))
+    } catch {
+      Write-Warning "Could not store local feedback: $_"
+      Write-JsonResponse $Context.Response 500 @{ error = "The local server could not store your note. Please try again." }
+      return
+    }
+    Write-JsonResponse $Context.Response 201 @{ ok = $true }
+    return
+  }
+
   $remoteRequest = [System.Net.Http.HttpRequestMessage]::new(
     [System.Net.Http.HttpMethod]::Post,
     [Uri]("$cloudApiBaseUrl$($request.Url.AbsolutePath)")
@@ -54,6 +98,10 @@ function Handle-ApiRequest {
     [System.Text.Encoding]::UTF8,
     "application/json"
   )
+  $origin = $request.Headers["Origin"]
+  if ($origin) {
+    $remoteRequest.Headers.TryAddWithoutValidation("Origin", $origin) | Out-Null
+  }
 
   try {
     $remoteResponse = $httpClient.SendAsync($remoteRequest).GetAwaiter().GetResult()
@@ -125,12 +173,12 @@ try {
       }
       $relativePath = [Uri]::UnescapeDataString($context.Request.Url.AbsolutePath.TrimStart("/"))
       if ([string]::IsNullOrWhiteSpace($relativePath)) { $relativePath = "index.html" }
-      if ($relativePath -ne "index.html") {
+      if ($relativePath -notin @("index.html", "feedback.html")) {
         $context.Response.StatusCode = 404
         $context.Response.Close()
         continue
       }
-      $filePath = Join-Path $siteRoot "index.html"
+      $filePath = Join-Path $siteRoot $relativePath
       $bytes = [System.IO.File]::ReadAllBytes($filePath)
       $context.Response.ContentType = Get-ContentType $filePath
       $context.Response.Headers["Cache-Control"] = "no-store"

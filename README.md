@@ -12,3 +12,9 @@ Use the same username and Game Code on all three addresses:
 Deploy the latest site and API changes to Netlify before using `localhost:5500`;
 its browser requests to the cloud API require the updated CORS configuration.
 An internet connection is required for account and save operations.
+
+New accounts receive a one-time Recovery ID after creation. Save it privately;
+it can reset the account's Game Code and is rotated after each successful
+recovery. The API must be deployed with Recovery ID support for account
+creation and recovery to work. Accounts created before that deployment do not
+have a Recovery ID.

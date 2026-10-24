@@ -1,10 +1,12 @@
-import { createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
 const accounts = getStore({ name: "dj-click-deck-games", consistency: "strong" });
+const feedbackNotes = getStore({ name: "dj-click-deck-feedback", consistency: "strong" });
 const maxGameCodeLength = 256;
 const maxRecordingLength = 4_000_000;
 const maxRequestLength = 16 * 1024 * 1024;
+const maxFeedbackLength = 2_000;
 const allowedOrigins = new Set([
   "https://djdeck4.netlify.app",
   "http://localhost:5500",
@@ -52,6 +54,14 @@ function testSnapshot(snapshot) {
 
 function createSecretHash(gameCode, salt, iterations) {
   return pbkdf2Sync(gameCode, Buffer.from(salt, "base64"), iterations, 32, "sha1").toString("base64");
+}
+
+function createRecoveryId() {
+  return randomBytes(16).toString("hex").toUpperCase();
+}
+
+function hashRecoveryId(recoveryId) {
+  return createHash("sha256").update(recoveryId.toUpperCase()).digest();
 }
 
 function createSessionToken(usernameKey, secretHash) {
@@ -121,6 +131,29 @@ async function handleRequest(request, endpoint) {
     });
   }
 
+  if (endpoint === "capabilities") {
+    return respond(200, { recoveryIds: true });
+  }
+
+  if (endpoint === "feedback") {
+    if (!origin || !allowedOrigins.has(origin)) {
+      return respond(403, { error: "Feedback must be sent from the DJ Click Deck site." });
+    }
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    if (body.website) {
+      return respond(202, { ok: true });
+    }
+    if (!note || note.length > maxFeedbackLength) {
+      return respond(400, { error: `Write a note of 1 to ${maxFeedbackLength} characters.` });
+    }
+    const id = randomBytes(16).toString("hex");
+    await feedbackNotes.setJSON(`note:${Date.now()}:${id}`, {
+      note,
+      createdAt: new Date().toISOString()
+    });
+    return respond(201, { ok: true });
+  }
+
   const username = typeof body.username === "string" ? body.username.trim() : "";
   const gameCode = typeof body.gameCode === "string" ? body.gameCode : "";
   if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
@@ -137,6 +170,7 @@ async function handleRequest(request, endpoint) {
       return respond(400, { error: "The new game data is invalid." });
     }
 
+    const recoveryId = createRecoveryId();
     const salt = randomBytes(32).toString("base64");
     const iterations = 40_000;
     const account = {
@@ -144,6 +178,7 @@ async function handleRequest(request, endpoint) {
       salt,
       iterations,
       secretHash: createSecretHash(gameCode, salt, iterations),
+      recoveryHash: hashRecoveryId(recoveryId).toString("hex"),
       snapshot: body.snapshot,
       recordingBase64: null,
       recordingType: "audio/webm"
@@ -156,13 +191,55 @@ async function handleRequest(request, endpoint) {
     return respond(201, {
       snapshot: body.snapshot,
       created: true,
+      recoveryId,
       sessionToken: createSessionToken(usernameKey, account.secretHash)
     });
   }
 
   const account = await accounts.get(accountKey, { type: "json" });
   if (!account) {
-    return respond(401, { error: "Username or Game Code not found. Check both and try again." });
+    return respond(401, {
+      error: endpoint === "recover"
+        ? "Username or Recovery ID not found. Check both and try again."
+        : "Username or Game Code not found. Check both and try again."
+    });
+  }
+
+  if (endpoint === "recover") {
+    const recoveryId = typeof body.recoveryId === "string" ? body.recoveryId.trim() : "";
+    const newGameCode = typeof body.newGameCode === "string" ? body.newGameCode : "";
+    if (!/^[A-Fa-f0-9]{32}$/.test(recoveryId)
+      || !newGameCode
+      || newGameCode.length > maxGameCodeLength) {
+      return respond(401, { error: "Username or Recovery ID not found. Check both and try again." });
+    }
+
+    const storedRecoveryHash = typeof account.recoveryHash === "string"
+      && /^[a-f0-9]{64}$/i.test(account.recoveryHash)
+      ? Buffer.from(account.recoveryHash, "hex")
+      : Buffer.alloc(32);
+    const candidateRecoveryHash = hashRecoveryId(recoveryId);
+    const recoveryMatches = timingSafeEqual(candidateRecoveryHash, storedRecoveryHash)
+      && typeof account.recoveryHash === "string"
+      && /^[a-f0-9]{64}$/i.test(account.recoveryHash);
+    if (!recoveryMatches) {
+      return respond(401, { error: "Username or Recovery ID not found. Check both and try again." });
+    }
+
+    const nextRecoveryId = createRecoveryId();
+    const salt = randomBytes(32).toString("base64");
+    const iterations = account.iterations;
+    account.salt = salt;
+    account.secretHash = createSecretHash(newGameCode, salt, iterations);
+    account.recoveryHash = hashRecoveryId(nextRecoveryId).toString("hex");
+    await accounts.setJSON(accountKey, account);
+    return respond(200, {
+      snapshot: account.snapshot,
+      recordingBase64: account.recordingBase64,
+      recordingType: account.recordingType,
+      recoveryId: nextRecoveryId,
+      sessionToken: createSessionToken(usernameKey, account.secretHash)
+    });
   }
 
   if (endpoint === "load") {

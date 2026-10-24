@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090714">
+  <title>Send a note · DJ Click Deck</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #f8f5ed;
+      background:
+        radial-gradient(ellipse at 18% 22%, rgb(0 229 255 / 14%), transparent 30%),
+        radial-gradient(ellipse at 82% 28%, rgb(255 39 173 / 13%), transparent 32%),
+        radial-gradient(ellipse at 50% 100%, #211331, #090714 68%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 1.25rem;
+      display: grid;
+      place-items: center;
+    }
+
+    main {
+      width: min(100%, 34rem);
+      padding: clamp(1.5rem, 6vw, 3rem);
+      border: 1px solid rgb(178 118 255 / 22%);
+      border-radius: 24px;
+      background: linear-gradient(145deg, rgb(255 255 255 / 6%), rgb(16 10 32 / 90%));
+      box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #73f7ff;
+      font-size: clamp(1.7rem, 7vw, 2.3rem);
+    }
+
+    p {
+      color: #c5bdd3;
+      line-height: 1.6;
+    }
+
+    label {
+      display: block;
+      margin: 1.25rem 0 0.5rem;
+      font-weight: 700;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 10rem;
+      padding: 0.8rem;
+      border: 1px solid rgb(115 247 255 / 45%);
+      border-radius: 10px;
+      color: #f8f5ed;
+      background: #100d1a;
+      font: inherit;
+      resize: vertical;
+    }
+
+    button,
+    .back-link {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.7rem 1rem;
+      border: 0;
+      border-radius: 10px;
+      color: #090714;
+      background: #73f7ff;
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
+    button:focus-visible,
+    textarea:focus-visible,
+    .back-link:focus-visible {
+      outline: 3px solid #ff52ce;
+      outline-offset: 3px;
+    }
+
+    [role="status"] {
+      min-height: 1.5em;
+      overflow-wrap: anywhere;
+      color: #ff7a73;
+    }
+
+    .website-field {
+      position: absolute;
+      left: -10000px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Write a note to us</h1>
+    <p>This will not open your game or disable your lockout, but it will let us know if we made a mistake.</p>
+    <form id="feedbackForm">
+      <div class="website-field" aria-hidden="true">
+        <label for="website">Leave this field blank</label>
+        <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+      <label for="note">Your note</label>
+      <textarea id="note" name="note" maxlength="2000" required></textarea>
+      <button id="sendButton" type="submit">Send note</button>
+    </form>
+    <p id="status" role="status" aria-live="polite"></p>
+    <a class="back-link" href="index.html">Back to DJ Click Deck</a>
+  </main>
+  <script>
+    const feedbackForm = document.getElementById("feedbackForm");
+    const noteInput = document.getElementById("note");
+    const websiteInput = document.getElementById("website");
+    const sendButton = document.getElementById("sendButton");
+    const status = document.getElementById("status");
+
+    feedbackForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!feedbackForm.reportValidity()) {
+        return;
+      }
+
+      sendButton.disabled = true;
+      try {
+        const note = noteInput.value.trim();
+        const file = new Blob([note], { type: "text/plain;charset=utf-8" });
+        const downloadUrl = URL.createObjectURL(file);
+        const downloadLink = document.createElement("a");
+        downloadLink.href = downloadUrl;
+        downloadLink.download = "mistakenote.txt";
+        document.body.append(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+        feedbackForm.hidden = true;
+        status.textContent = "Your note was downloaded as mistakenote.txt. It was not sent online. This does not unlock your game or change the lockout.";
+      } catch (error) {
+        status.textContent = error instanceof Error
+          ? `Could not download your note: ${error.message}`
+          : "Could not download your note. Please try again.";
+        sendButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
